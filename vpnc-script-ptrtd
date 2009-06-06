@@ -1,0 +1,149 @@
+#!/bin/sh
+
+# This is a replacement for the standard vpnc-script for use with vpnc
+# and openconnect. It sets up VPN routing which doesn't screw over the
+# _normal_ routing of the box.
+
+# It sets up a new network namespace for the VPN to use, and it runs
+# pTRTd (http://www.litech.org/ptrtd/) in that namespace. Connections
+# to the VPN are actually made as IPv6 connections, and pTRTd handles
+# converting them to Legacy IP and forwarding them.
+
+# The full range of Legacy IP addresses on the VPN is available to the
+# host through a tiny corner of the IPv6 address space; for this purpose
+# we use fec0:0:0:ffff:0:0:xxyy:zzww to represent the address xx.yy.zz.ww
+# on the VPN.
+
+# TODO: Either use totd (ftp://ftp.pasta.cs.uit.no/pub/Vermicelli/) or
+# preferably extend dnsmasq to handle DNS for us. We want the following:
+#  - A queries for non-existent VPN hosts return NXDOMAIN (no munging)
+#  - A queries for _extant_ VPN hosts return NOERROR instead of the result.
+#  - AAAA queries return the A result, converted to the above IPv6 space.
+#  - PTR queries within the IPv6 space converted appropriately.
+
+function connect_parent()
+{
+    # XXX: How do we work out what it _really_ is?
+    export PARENT_NETNS=$$
+
+    # XXX: Make sure it doesn't exist in this namespace already
+    export RETURNDEV=x$TUNDEV
+
+    ./netunshare $0 $@ &
+    CHILDPID=$!
+
+    # XXX: If we do this too soon (before the unshare), we're just
+    # giving it to our _own_ netns. which achieves nothing.
+    # So give it away until we _can't_ give it away any more.
+    while  /sbin/ip link set $TUNDEV netns $CHILDPID 2>/dev/null; do
+	sleep 0.1
+    done
+
+    # Wait for the ptrtd tundev to appear in this namespace
+    while ! ip link show $RETURNDEV &> /dev/null ; do
+	sleep 1
+    done
+    /sbin/ip link set $RETURNDEV up
+    /sbin/ip addr add fe80::1 dev $RETURNDEV
+    /sbin/ip route add fec0:0:0:ffff::/64 dev $RETURNDEV
+
+    # XXX: Local hack -- my company's VPN server returns
+    # "foo.company.com" instead of just "company.com".
+    CISCO_DEF_DOMAIN=`echo $CISCO_DEF_DOMAIN | cut -f2- -d.`
+
+    # Work out the IPv6 address of the nameservers...
+    IPV6NS=
+    for NS in $INTERNAL_IP4_DNS; do
+	A=`echo $NS | cut -f1 -d.`
+	B=`echo $NS | cut -f2 -d.`
+	C=`echo $NS | cut -f3 -d.`
+	D=`echo $NS | cut -f4 -d.`
+	THISNS=`printf fec0:0:0:ffff:0:0:%02x%02x:%02x%02x $A $B $C $D`
+	IPV6NS="$THISNS $IPV6NS"
+	DNSMASQ_CMDLINE="-S /$CISCO_DEF_DOMAIN/$IPV6NS $DNSMASQ_CMDLINE"
+    done
+    echo IPv6 DNS: $IPV6NS
+    
+    # XXX: Add totd-like capability to dnsmasq
+    dnsmasq $DNSMASQ_CMDLINE
+}
+
+function connect()
+{
+    if [ -z "$PARENT_NETNS" ]; then
+	connect_parent
+	exit 0
+    fi
+
+    # Wait for the tundev to appear in this namespace
+    while ! ip link show $TUNDEV &>/dev/null ; do
+	sleep 0.1
+    done
+
+    # Set up Legacy IP in the new namespace
+    /sbin/ip link set lo up
+    /sbin/ip link set $TUNDEV up
+    /sbin/ip -4 addr add $INTERNAL_IP4_ADDRESS dev $TUNDEV
+    /sbin/ip -4 route add default dev $TUNDEV
+    if [ "$INTERNAL_IP4_MTU" != "" ]; then
+	/sbin/ip link set $TUNDEV mtu $INTERNAL_IP4_MTU
+    fi
+
+#    ifconfig
+#    route
+
+    # For debugging, really. Lets you ssh into the netns with
+    # ssh fec0:0:0:ffff:0:0:7f00:1
+    /usr/sbin/sshd -D &
+    SSHD_PID=$!
+
+    # Start ptrtd
+    ptrtd -i tun:$RETURNDEV -d &>/dev/null &
+    PTRTD_PID=$!
+
+    # Wait for the ptrtd to make its device
+    while ! ip link show $TUNDEV &>/dev/null ; do 
+	sleep 0.1
+    done
+
+    # Now give the ptrtd device back to the parent
+    ip link set $RETURNDEV down
+    /sbin/ip link set $RETURNDEV netns $PARENT_NETNS
+
+    #Hm, this doesn't work because the tundev doesn't go away when it should
+    #while ip link show $TUNDEV 2> /dev/null ; do
+    #  sleep 1
+    #done
+
+    # Wait for ptrtd to die (which it will when disconnect() kills its tun)
+    wait $PTRTD_PID
+
+    kill -TERM $SSHD_PID
+
+    # Wait a while to avoid tun BUG() if we quit and the netns goes away
+    # before vpnc/openconnect closes its tun fd.
+    sleep 1
+}
+
+function disconnect()
+{
+    RETURNDEV=x$TUNDEV
+
+    # This will kill ptrtd inside the netns, leaving the script to clean up
+    ip link del $RETURNDEV
+
+    # XXX: Undo the dnsmasq stuff.
+    killall dnsmasq
+    # XXX: properly.
+}
+
+case $reason in
+    connect)
+	connect
+	;;
+
+    disconnect)
+	disconnect
+	;;
+esac
+
