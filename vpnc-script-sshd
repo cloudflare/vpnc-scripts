@@ -174,6 +174,11 @@ function connect_parent()
     $IP addr add fec0::2/64 dev $LOCALDEV
 
     echo "VPN now accessible through 'ssh fec0::1'"
+    if ! grep -q 127.0.0.1 /etc/resolv.conf; then
+	echo "WARNING: Your host needs to be running a local dnsmasq or named"
+	echo "WARNING: and /etc/resolv.conf needs to point to 127.0.0.1"
+	# XXX: We could probably fix that for ourselves...
+    fi
 }
 
 function connect()
@@ -203,6 +208,16 @@ function connect()
     $IP link set $REMOTEDEV up
     $IP -6 addr add fec0::1/64 dev $REMOTEDEV
 
+    # Run dnsmasq to provide DNS service for this namespace.
+    # The host needs to be running its own local nameserver/dnsmasq and
+    # /etc/resolv.conf should be pointing to 127.0.0.1 already.
+    DNSMASQ_ARGS="--port=53 -k -R"
+    for NS in $INTERNAL_IP4_DNS; do 
+	DNSMASQ_ARGS="$DNSMASQ_ARGS -S $NS"
+    done
+    /usr/sbin/dnsmasq $DNSMASQ_ARGS &
+    DNSMASQ_PID=$!
+    
     # Set up sshd
     /usr/sbin/sshd -D &
     SSHD_PID=$!
@@ -214,12 +229,13 @@ function connect()
     fi
 
     # Wait for the veth link to be closed...
-    while ip link show $REMOTEDEV >/dev/null ; do
-	sleep 2
+    while ip link show $REMOTEDEV &>/dev/null ; do
+	sleep 1
     done
 
+    kill -TERM $DNSMASQ_PID
     kill -TERM $SSHD_PID
-    if [ XINETD_PID != "" ]; then
+    if [ "$XINETD_PID" != "" ]; then
 	kill -TERM $XINETD_PID
     fi
     # Wait a while to avoid tun BUG() if we quit and the netns goes away
