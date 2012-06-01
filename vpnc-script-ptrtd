@@ -39,7 +39,7 @@
 #  - AAAA queries return the A result, converted to the above IPv6 space.
 #  - PTR queries within the IPv6 space converted appropriately.
 
-function connect_parent()
+connect_parent()
 {
     # XXX: How do we work out what it _really_ is?
     export PARENT_NETNS=$$
@@ -58,7 +58,7 @@ function connect_parent()
     done
 
     # Wait for the ptrtd tundev to appear in this namespace
-    while ! ip link show $RETURNDEV &> /dev/null ; do
+    while ! ip link show $RETURNDEV >/dev/null 2>&1 ; do
 	sleep 1
     done
     /sbin/ip link set $RETURNDEV up
@@ -86,7 +86,7 @@ function connect_parent()
     dnsmasq $DNSMASQ_CMDLINE
 }
 
-function connect()
+connect()
 {
     if [ -z "$PARENT_NETNS" ]; then
 	connect_parent
@@ -94,7 +94,7 @@ function connect()
     fi
 
     # Wait for the tundev to appear in this namespace
-    while ! ip link show $TUNDEV &>/dev/null ; do
+    while ! ip link show $TUNDEV >/dev/null 2>&1 ; do
 	sleep 0.1
     done
 
@@ -116,11 +116,11 @@ function connect()
     SSHD_PID=$!
 
     # Start ptrtd
-    ptrtd -i tun:$RETURNDEV -d &>/dev/null &
+    ptrtd -i tun:$RETURNDEV -d >/dev/null 2>&1 &
     PTRTD_PID=$!
 
     # Wait for the ptrtd to make its device
-    while ! ip link show $TUNDEV &>/dev/null ; do 
+    while ! ip link show $TUNDEV >/dev/null 2>&1 ; do 
 	sleep 0.1
     done
 
@@ -143,7 +143,7 @@ function connect()
     sleep 1
 }
 
-function disconnect()
+disconnect()
 {
     RETURNDEV=x$TUNDEV
 

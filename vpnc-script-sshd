@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 #
 # © 2009 David Woodhouse <dwmw2@infradead.org>
 #
@@ -161,7 +161,7 @@ NETNSNAME=$SCRIPTNAME
 # XINETDCONF=`dirname $0`/xinetd.netns.conf
 
 PS4=" \$\$+ "
-function connect_parent()
+connect_parent()
 {
     export PARENT_NETNS=$$
 
@@ -208,7 +208,7 @@ function connect_parent()
     fi
 }
 
-function connect()
+connect()
 {
     if [ -z "$PARENT_NETNS" ]; then
 	connect_parent
@@ -218,7 +218,7 @@ function connect()
     # This is the child, which remains running in the background
 
     # Wait for the tundev to appear in this namespace
-    while ! ip link show $TUNDEV &>/dev/null ; do
+    while ! ip link show $TUNDEV >/dev/null 2>&1 ; do
 	sleep 0.1
     done
 
@@ -265,7 +265,7 @@ function connect()
     fi
 
     # Wait for the veth link to be closed...
-    while ip link show $REMOTEDEV &>/dev/null ; do
+    while ip link show $REMOTEDEV >/dev/null 2>&1 ; do
 	sleep 1
     done
 
@@ -279,7 +279,7 @@ function connect()
     sleep 1
 }
 
-function disconnect()
+disconnect()
 {
     # Kill our end of the veth link, leaving the child script to clean up
     $IP link del $TUNDEV-vpnssh0
