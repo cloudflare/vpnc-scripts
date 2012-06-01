@@ -155,6 +155,8 @@
 # 2009-06-06
 
 IP=/sbin/ip
+SCRIPTNAME=`basename $0`
+NETNSNAME=$SCRIPTNAME
 
 # XINETDCONF=`dirname $0`/xinetd.netns.conf
 
@@ -170,12 +172,19 @@ function connect_parent()
 	exit 1
     fi
 
+    $IP netns delete $NETNSNAME >/dev/null 2>&1
+    if ! $IP netns add $NETNSNAME; then
+	echo "Creating network namespace $NETNSNAME failed"
+	echo "Perhaps you don't have network namespace support in your kernel?"
+	exit 1
+    fi
+
     $IP link add dev $TUNDEV-vpnssh%d type veth
     # XXX: Assume vpnssh0 and vpnssh1; ip doesn't tell us!
     LOCALDEV=$TUNDEV-vpnssh0
     export REMOTEDEV=$TUNDEV-vpnssh1
     
-    ./netunshare $0 $@ &
+    $IP netns exec $NETNSNAME $0 $@ &
     CHILDPID=$!
 
     # XXX: If we do this too soon (before the unshare), we're just
@@ -265,6 +274,10 @@ function disconnect()
 {
     # Kill our end of the veth link, leaving the child script to clean up
     $IP link del $TUNDEV-vpnssh0
+
+    while ! $IP netns delete $NETNSNAME >/dev/null 2>&1 ; do
+	sleep 0.1
+    done
 }
 
 case $reason in
