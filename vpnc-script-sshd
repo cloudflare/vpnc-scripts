@@ -225,8 +225,14 @@ function connect()
     # Set up Legacy IP in the new namespace
     $IP link set lo up
     $IP link set $TUNDEV up
-    $IP -4 addr add $INTERNAL_IP4_ADDRESS dev $TUNDEV
-    $IP -4 route add default dev $TUNDEV
+    if [ -n "$INTERNAL_IP4_ADDRESS" ]; then
+        $IP -4 addr add $INTERNAL_IP4_ADDRESS dev $TUNDEV
+        $IP -4 route add default dev $TUNDEV
+    fi
+    if [ -n "$INTERNAL_IP6_ADDRESS" ]; then
+        $IP -6 addr add $INTERNAL_IP6_ADDRESS dev $TUNDEV
+        $IP -6 route add default dev $TUNDEV
+    fi
     if [ "$INTERNAL_IP4_MTU" != "" ]; then
 	$IP link set $TUNDEV mtu $INTERNAL_IP4_MTU
     fi
@@ -240,6 +246,9 @@ function connect()
     # /etc/resolv.conf should be pointing to 127.0.0.1 already.
     DNSMASQ_ARGS="--port=53 -k -R"
     for NS in $INTERNAL_IP4_DNS; do 
+	DNSMASQ_ARGS="$DNSMASQ_ARGS -S $NS"
+    done
+    for NS in $INTERNAL_IP6_DNS; do
 	DNSMASQ_ARGS="$DNSMASQ_ARGS -S $NS"
     done
     /usr/sbin/dnsmasq $DNSMASQ_ARGS &
