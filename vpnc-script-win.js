@@ -48,7 +48,7 @@ case "connect":
 	    internal_ip4_netmask = env("INTERNAL_IP4_NETMASK");
 	}
 
-	echo("Configuring \"" + env("TUNDEV") + "\" interface...");
+	echo("Configuring \"" + env("TUNDEV") + "\" interface for Legacy IP...");
 	run("netsh interface ip set address \"" + env("TUNDEV") + "\" static " +
 	    env("INTERNAL_IP4_ADDRESS") + " " + internal_ip4_netmask);
 
@@ -76,7 +76,7 @@ case "connect":
 	echo("done.");
 
 	// Add internal network routes
-        echo("Configuring networks:");
+        echo("Configuring Legacy IP networks:");
         if (env("CISCO_SPLIT_INC")) {
 		for (var i = 0 ; i < parseInt(env("CISCO_SPLIT_INC")); i++) {
 			var network = env("CISCO_SPLIT_INC_" + i + "_ADDR");
@@ -88,8 +88,40 @@ case "connect":
 		}
 	} else {
 		echo("Gateway did not provide network configuration.");
+		// XXX: Doesn't this mean we should set the default route to the VPN?
 	}
 	echo("Route configuration done.");
+
+        if (env("INTERNAL_IP6_ADDRESS")) {
+		echo("Configuring \"" + env("TUNDEV") + "\" interface for IPv6...");
+
+		run("netsh interface ipv6 set address \"" + env("TUNDEV") + "\" " +
+		    env("INTERNAL_IP6_ADDRESS") + " store=active");
+
+		echo("done.");
+
+		// Add internal network routes
+	        echo("Configuring Legacy IP networks:");
+	        if (env("INTERNAL_IP6_NETMASK") && !env("INTERNAL_IP6_NETMASK").match("/128$")) {
+			run("netsh interface ipv6 add route " + env("INTERNAL_IP6_NETMASK") +
+			    " \"" + env("TUNDEV") + "\" fe80::8 store=active")
+		}
+
+	        if (env("CISCO_IPV6_SPLIT_INC")) {
+			for (var i = 0 ; i < parseInt(env("CISCO_IPV6_SPLIT_INC")); i++) {
+				var network = env("CISCO_IPV6_SPLIT_INC_" + i + "_ADDR");
+				var netmasklen = env("CISCO_SPLIT_INC_" + i +
+						 "_MASKLEN");
+				run("netsh interface ipv6 add route " + network + "/" +
+				    netmasklen + " \"" + env("TUNDEV") + "\" fe80::8 store=active")
+			}
+		} else {
+			echo("Setting default IPv6 route through VPN.");
+			run("netsh interface ipv6 add route 2000::/3 \"" + env("TUNDEV") +
+			    "\" fe80::8 store=active");
+		}
+		echo("IPv6 route configuration done.");
+	}
 
 	if (env("CISCO_BANNER")) {
 		echo("--------------------------------------------------");
