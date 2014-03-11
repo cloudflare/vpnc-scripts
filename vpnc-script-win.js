@@ -47,6 +47,15 @@ case "connect":
 	if (env("INTERNAL_IP4_NETMASK")) {
 	    internal_ip4_netmask = env("INTERNAL_IP4_NETMASK");
 	}
+	if (env("INTERNAL_IP4_MTU")) {
+	    echo("MTU: " + env("INTERNAL_IP4_MTU"));
+	    run("netsh interface ipv4 set subinterface \"" + env("TUNDEV") +
+		"\" mtu=" + env("INTERNAL_IP4_MTU") + " store=active");
+	    if (env("INTERNAL_IP6_ADDRESS")) {
+		run("netsh interface ipv6 set subinterface \"" + env("TUNDEV") +
+		    "\" mtu=" + env("INTERNAL_IP4_MTU") + " store=active");
+	    }
+	}
 
 	echo("Configuring \"" + env("TUNDEV") + "\" interface for Legacy IP...");
 	run("netsh interface ip set address \"" + env("TUNDEV") + "\" static " +
