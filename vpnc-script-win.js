@@ -19,10 +19,22 @@ function run(cmd)
 
 function getDefaultGateway()
 {
-	if (run("route print").match(/Default Gateway: *(.*)/)) {
-		return (RegExp.$1);
+	if (run("route print").match(/0\.0\.0\.0 *(0|128)\.0\.0\.0 *([0-9\.]*)/)) {
+		return (RegExp.$2);
 	}
 	return ("");
+}
+
+function waitForInterface() {
+	var if_route = new RegExp(env("INTERNAL_IP4_ADDRESS") + " *255.255.255.255");
+	for (var i = 0; i < 5; i++) {
+		echo("Waiting for interface to come up...");
+		WScript.Sleep(2000);
+		if (run("route print").match(if_route)) {
+			return true;
+		}
+	}
+	return false;
 }
 
 // --------------------------------------------------------------
@@ -34,19 +46,34 @@ var internal_ip4_netmask = "255.255.255.0"
 var ws = WScript.CreateObject("WScript.Shell");
 var env = ws.Environment("Process");
 
+// How to add the default internal route
+// 0 - As interface gateway when setting properties
+// 1 - As a 0.0.0.0/0 route with a lower metric than the default route
+// 2 - As 0.0.0.0/1 + 128.0.0.0/1 routes (override the default route cleanly)
+var REDIRECT_GATEWAY_METHOD = 0;
+
 switch (env("reason")) {
 case "pre-init":
 	break;
 case "connect":
 	var gw = getDefaultGateway();
+	var address_array = env("INTERNAL_IP4_ADDRESS").split(".");
+	var netmask_array = env("INTERNAL_IP4_NETMASK").split(".");
+	// Calculate the first usable address in subnet
+	var internal_gw_array = new Array(
+		address_array[0] & netmask_array[0],
+		address_array[1] & netmask_array[1],
+		address_array[2] & netmask_array[2],
+		(address_array[3] & netmask_array[3]) + 1
+	);
+	var internal_gw = internal_gw_array.join(".");
+	
 	echo("VPN Gateway: " + env("VPNGATEWAY"));
 	echo("Internal Address: " + env("INTERNAL_IP4_ADDRESS"));
 	echo("Internal Netmask: " + env("INTERNAL_IP4_NETMASK"));
+	echo("Internal Gateway: " + internal_gw);
 	echo("Interface: \"" + env("TUNDEV") + "\"");
-
-	if (env("INTERNAL_IP4_NETMASK")) {
-	    internal_ip4_netmask = env("INTERNAL_IP4_NETMASK");
-	}
+	
 	if (env("INTERNAL_IP4_MTU")) {
 	    echo("MTU: " + env("INTERNAL_IP4_MTU"));
 	    run("netsh interface ipv4 set subinterface \"" + env("TUNDEV") +
@@ -58,14 +85,26 @@ case "connect":
 	}
 
 	echo("Configuring \"" + env("TUNDEV") + "\" interface for Legacy IP...");
-	run("netsh interface ip set address \"" + env("TUNDEV") + "\" static " +
-	    env("INTERNAL_IP4_ADDRESS") + " " + internal_ip4_netmask);
+	
+	if (!env("CISCO_SPLIT_INC") && REDIRECT_GATEWAY_METHOD != 2) {
+		// Interface metric must be set to 1 in order to add a route with metric 1 since Windows Vista
+		run("netsh interface ip set interface \"" + env("TUNDEV") + "\" metric=1");
+	}
+	
+	if (env("CISCO_SPLIT_INC") || REDIRECT_GATEWAY_METHOD > 0) {
+		run("netsh interface ip set address \"" + env("TUNDEV") + "\" static " +
+			env("INTERNAL_IP4_ADDRESS") + " " + env("INTERNAL_IP4_NETMASK"));
+	} else {
+		// The default route will be added automatically
+		run("netsh interface ip set address \"" + env("TUNDEV") + "\" static " +
+			env("INTERNAL_IP4_ADDRESS") + " " + env("INTERNAL_IP4_NETMASK") + " " + internal_gw + " 1");
+	}
 
 	// Add direct route for the VPN gateway to avoid routing loops
 	run("route add " + env("VPNGATEWAY") +
             " mask 255.255.255.255 " + gw);
 
-        if (env("INTERNAL_IP4_NBNS")) {
+    if (env("INTERNAL_IP4_NBNS")) {
 		var wins = env("INTERNAL_IP4_NBNS").split(/ /);
 		for (var i = 0; i < wins.length; i++) {
 	                run("netsh interface ip add wins \"" +
@@ -74,7 +113,7 @@ case "connect":
 		}
 	}
 
-        if (env("INTERNAL_IP4_DNS")) {
+    if (env("INTERNAL_IP4_DNS")) {
 		var dns = env("INTERNAL_IP4_DNS").split(/ /);
 		for (var i = 0; i < dns.length; i++) {
 	                run("netsh interface ip add dns \"" +
@@ -85,19 +124,33 @@ case "connect":
 	echo("done.");
 
 	// Add internal network routes
-        echo("Configuring Legacy IP networks:");
-        if (env("CISCO_SPLIT_INC")) {
+    echo("Configuring Legacy IP networks:");
+    if (env("CISCO_SPLIT_INC")) {
+		// Waiting for the interface to be configured before to add routes
+		if (!waitForInterface()) {
+			echo("Interface does not seem to be up.");
+		}
+		
 		for (var i = 0 ; i < parseInt(env("CISCO_SPLIT_INC")); i++) {
 			var network = env("CISCO_SPLIT_INC_" + i + "_ADDR");
 			var netmask = env("CISCO_SPLIT_INC_" + i + "_MASK");
 			var netmasklen = env("CISCO_SPLIT_INC_" + i +
 					 "_MASKLEN");
 			run("route add " + network + " mask " + netmask +
-			     " " + env("INTERNAL_IP4_ADDRESS"));
+			     " " + internal_gw);
 		}
-	} else {
-		echo("Gateway did not provide network configuration.");
-		// XXX: Doesn't this mean we should set the default route to the VPN?
+	} else if (REDIRECT_GATEWAY_METHOD > 0) {
+		// Waiting for the interface to be configured before to add routes
+		if (!waitForInterface()) {
+			echo("Interface does not seem to be up.");
+		}
+		
+		if (REDIRECT_GATEWAY_METHOD == 1) {
+			run("route add 0.0.0.0 mask 0.0.0.0 " + internal_gw + " metric 1");
+		} else {
+			run("route add 0.0.0.0 mask 128.0.0.0 " + internal_gw);
+			run("route add 128.0.0.0 mask 128.0.0.0 " + internal_gw);
+		}
 	}
 	echo("Route configuration done.");
 
