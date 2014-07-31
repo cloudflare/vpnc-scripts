@@ -636,7 +636,7 @@ do_connect() {
 			eval NETWORK="\${CISCO_SPLIT_INC_${i}_ADDR}"
 			eval NETMASK="\${CISCO_SPLIT_INC_${i}_MASK}"
 			eval NETMASKLEN="\${CISCO_SPLIT_INC_${i}_MASKLEN}"
-			if [ $NETWORK != "0.0.0.0" ]; then
+			if [ "$NETWORK" != "0.0.0.0" ]; then
 				set_network_route "$NETWORK" "$NETMASK" "$NETMASKLEN"
 			else
 				set_default_route
@@ -683,7 +683,7 @@ do_disconnect() {
 			eval NETWORK="\${CISCO_SPLIT_INC_${i}_ADDR}"
 			eval NETMASK="\${CISCO_SPLIT_INC_${i}_MASK}"
 			eval NETMASKLEN="\${CISCO_SPLIT_INC_${i}_MASKLEN}"
-			if [ $NETWORK != "0.0.0.0" ]; then
+			if [ "$NETWORK" != "0.0.0.0" ]; then
 				# FIXME: This doesn't restore previously overwritten
 				#        routes.
 				del_network_route "$NETWORK" "$NETMASK" "$NETMASKLEN"
