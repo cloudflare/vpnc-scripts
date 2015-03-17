@@ -163,7 +163,7 @@ case "connect":
 		echo("done.");
 
 		// Add internal network routes
-	        echo("Configuring Legacy IP networks:");
+	        echo("Configuring IPv6 networks:");
 	        if (env("INTERNAL_IP6_NETMASK") && !env("INTERNAL_IP6_NETMASK").match("/128$")) {
 			run("netsh interface ipv6 add route " + env("INTERNAL_IP6_NETMASK") +
 			    " \"" + env("TUNDEV") + "\" fe80::8 store=active")
