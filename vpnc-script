@@ -78,7 +78,6 @@ PATH=/sbin:/usr/sbin:$PATH
 OS="`uname -s`"
 
 HOOKS_DIR=/etc/vpnc
-DEFAULT_ROUTE_FILE=/var/run/vpnc/defaultroute
 RESOLV_CONF_BACKUP=/var/run/vpnc/resolv.conf-backup
 SCRIPTNAME=`basename $0`
 
@@ -229,8 +228,8 @@ if [ -n "$IPROUTE" ]; then
 	}
 
 	set_default_route() {
-		$IPROUTE route | grep '^default' | fix_ip_get_output > "$DEFAULT_ROUTE_FILE"
-		$IPROUTE route replace default dev "$TUNDEV"
+		$IPROUTE route add 0.0.0.0/1 dev "$TUNDEV" metric 1
+		$IPROUTE route add 128.0.0.0/1 dev "$TUNDEV" metric 1
 		$IPROUTE route flush cache
 	}
 
@@ -243,11 +242,9 @@ if [ -n "$IPROUTE" ]; then
 	}
 
 	reset_default_route() {
-		if [ -s "$DEFAULT_ROUTE_FILE" ]; then
-			$IPROUTE route replace `cat "$DEFAULT_ROUTE_FILE"`
-			$IPROUTE route flush cache
-			rm -f -- "$DEFAULT_ROUTE_FILE"
-		fi
+		$IPROUTE route $route_syntax_del 0.0.0.0/1
+		$IPROUTE route $route_syntax_del 128.0.0.0/1
+		$IPROUTE route flush cache
 	}
 
 	del_network_route() {
@@ -299,10 +296,8 @@ else # use route command
 	}
 
 	set_default_route() {
-		DEFAULTGW="`get_default_gw`"
-		echo "$DEFAULTGW" > "$DEFAULT_ROUTE_FILE"
-		route $route_syntax_del default $route_syntax_gw "$DEFAULTGW"
-		route add default $route_syntax_gw "$INTERNAL_IP4_ADDRESS" $route_syntax_interface
+		route add 0.0.0.0/1 $route_syntax_gw "$INTERNAL_IP4_ADDRESS" $route_syntax_interface
+		route add 128.0.0.0/1 $route_syntax_gw "$INTERNAL_IP4_ADDRESS" $route_syntax_interface
 	}
 
 	set_network_route() {
@@ -314,11 +309,8 @@ else # use route command
 	}
 
 	reset_default_route() {
-		if [ -s "$DEFAULT_ROUTE_FILE" ]; then
-			route $route_syntax_del default $route_syntax_gw "`get_default_gw`" $route_syntax_interface
-			route add default $route_syntax_gw `cat "$DEFAULT_ROUTE_FILE"`
-			rm -f -- "$DEFAULT_ROUTE_FILE"
-		fi
+		route $route_syntax_del 0.0.0.0/1 $route_syntax_gw "$INTERNAL_IP4_ADDRESS" $route_syntax_interface
+		route $route_syntax_del 128.0.0.0/1 $route_syntax_gw "$INTERNAL_IP4_ADDRESS" $route_syntax_interface
 	}
 
 	del_network_route() {
