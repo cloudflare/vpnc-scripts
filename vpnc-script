@@ -820,6 +820,8 @@ case "$reason" in
 		;;
 	reconnect)
 		run_hooks reconnect
+		do_disconnect
+		do_connect
 		;;
 	*)
 		echo "unknown reason '$reason'. Maybe vpnc-script is out of date" 1>&2
